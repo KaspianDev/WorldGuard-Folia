@@ -46,7 +46,7 @@ import javax.annotation.Nullable;
  * against it.
  *
  * <p>Instances can be modified and access from several threads at a time.</p>
- *
+ * <p>
  * Note: this class has a natural ordering that is inconsistent with equals.
  * Regions with identical ids (and also the same priority) may exist in different managers (or no manager at all),
  * so care should be taken when comparing regions that have not been obtained from a single manager.
@@ -56,22 +56,30 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
     public static final String GLOBAL_REGION = "__global__";
     private static final Pattern VALID_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_,'\\-\\+/]{1,}$");
 
+    protected final Object boundsLock = new Object();
     protected BlockVector3 min;
     protected BlockVector3 max;
 
     private final String id;
     private final boolean transientRegion;
+    private final Object priorityLock = new Object();
     private int priority = 0;
+    private final Object parentLock = new Object();
     private ProtectedRegion parent;
+
+    private final Object ownersLock = new Object();
     private DefaultDomain owners = new DefaultDomain();
+    private final Object membersLock = new Object();
     private DefaultDomain members = new DefaultDomain();
+    private final Object flagsLock = new Object();
     private ConcurrentMap<Flag<?>, Object> flags = new ConcurrentHashMap<>();
+    private final Object dirtyLock = new Object();
     private boolean dirty = true;
 
     /**
      * Construct a new instance of this region.
      *
-     * @param id the name of this region
+     * @param id              the name of this region
      * @param transientRegion whether this region should only be kept in memory and not be saved
      * @throws IllegalArgumentException thrown if the ID is invalid (see {@link #isValidId(String)}
      */
@@ -114,8 +122,10 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
         }
 
         setDirty(true);
-        min = BlockVector3.at(minX, minY, minZ);
-        max = BlockVector3.at(maxX, maxY, maxZ);
+        synchronized (this.boundsLock) {
+            min = BlockVector3.at(minX, minY, minZ);
+            max = BlockVector3.at(maxX, maxY, maxZ);
+        }
     }
 
     /**
@@ -141,7 +151,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      * @return the minimum point
      */
     public BlockVector3 getMinimumPoint() {
-        return min;
+        synchronized (this.boundsLock) {
+            return min;
+        }
     }
 
     /**
@@ -161,7 +173,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      * @return the priority
      */
     public int getPriority() {
-        return priority;
+        synchronized (this.priorityLock) {
+            return priority;
+        }
     }
 
     /**
@@ -172,7 +186,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      */
     public void setPriority(int priority) {
         setDirty(true);
-        this.priority = priority;
+        synchronized (this.priorityLock) {
+            this.priority = priority;
+        }
     }
 
     /**
@@ -182,7 +198,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      */
     @Nullable
     public ProtectedRegion getParent() {
-        return parent;
+        synchronized (this.parentLock) {
+            return parent;
+        }
     }
 
     /**
@@ -196,7 +214,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
         setDirty(true);
 
         if (parent == null) {
-            this.parent = null;
+            synchronized (this.parentLock) {
+                this.parent = null;
+            }
             return;
         }
 
@@ -212,7 +232,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
             p = p.getParent();
         }
 
-        this.parent = parent;
+        synchronized (this.parentLock) {
+            this.parent = parent;
+        }
     }
 
     /**
@@ -229,7 +251,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      * @return the domain
      */
     public DefaultDomain getOwners() {
-        return owners;
+        synchronized (this.ownersLock) {
+            return owners;
+        }
     }
 
     /**
@@ -240,7 +264,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
     public void setOwners(DefaultDomain owners) {
         checkNotNull(owners);
         setDirty(true);
-        this.owners = new DefaultDomain(owners);
+        synchronized (this.ownersLock) {
+            this.owners = new DefaultDomain(owners);
+        }
     }
 
     /**
@@ -250,7 +276,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      * @return the members
      */
     public DefaultDomain getMembers() {
-        return members;
+        synchronized (this.membersLock) {
+            return members;
+        }
     }
 
     /**
@@ -261,7 +289,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
     public void setMembers(DefaultDomain members) {
         checkNotNull(members);
         setDirty(true);
-        this.members = new DefaultDomain(members);
+        synchronized (this.membersLock) {
+            this.members = new DefaultDomain(members);
+        }
     }
 
     /**
@@ -270,7 +300,11 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      * @return whether there are members or owners
      */
     public boolean hasMembersOrOwners() {
-        return owners.size() > 0 || members.size() > 0;
+        synchronized (this.ownersLock) {
+            synchronized (this.membersLock) {
+                return owners.size() > 0 || members.size() > 0;
+            }
+        }
     }
 
     /**
@@ -282,8 +316,10 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
     public boolean isOwner(LocalPlayer player) {
         checkNotNull(player);
 
-        if (owners.contains(player)) {
-            return true;
+        synchronized (this.ownersLock) {
+            if (owners.contains(player)) {
+                return true;
+            }
         }
 
         ProtectedRegion curParent = getParent();
@@ -358,8 +394,11 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
             return true;
         }
 
-        if (members.contains(playerName)) {
-            return true;
+
+        synchronized (this.membersLock) {
+            if (members.contains(playerName)) {
+                return true;
+            }
         }
 
         ProtectedRegion curParent = getParent();
@@ -383,8 +422,10 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
     public boolean isMemberOnly(LocalPlayer player) {
         checkNotNull(player);
 
-        if (members.contains(player)) {
-            return true;
+        synchronized (this.membersLock) {
+            if (members.contains(player)) {
+                return true;
+            }
         }
 
         ProtectedRegion curParent = getParent();
@@ -412,7 +453,10 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
     public <T extends Flag<V>, V> V getFlag(T flag) {
         checkNotNull(flag);
 
-        Object obj = flags.get(flag);
+        Object obj;
+        synchronized (this.flagsLock) {
+            obj = flags.get(flag);
+        }
         V val;
 
         if (obj != null) {
@@ -436,10 +480,12 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
         checkNotNull(flag);
         setDirty(true);
 
-        if (val == null) {
-            flags.remove(flag);
-        } else {
-            flags.put(flag, val);
+        synchronized (this.flagsLock) {
+            if (val == null) {
+                flags.remove(flag);
+            } else {
+                flags.put(flag, val);
+            }
         }
     }
 
@@ -449,7 +495,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      * @return the map of flags currently used for this region
      */
     public Map<Flag<?>, Object> getFlags() {
-        return flags;
+        synchronized (this.flagsLock) {
+            return flags;
+        }
     }
 
     /**
@@ -463,7 +511,9 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
         checkNotNull(flags);
 
         setDirty(true);
-        this.flags = new ConcurrentHashMap<>(flags);
+        synchronized (this.flagsLock) {
+            this.flags = new ConcurrentHashMap<>(flags);
+        }
     }
 
     /**
@@ -514,7 +564,7 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
      */
     public boolean contains(BlockVector2 position) {
         checkNotNull(position);
-        return contains(BlockVector3.at(position.getBlockX(), min.getBlockY(), position.getBlockZ()));
+        return contains(BlockVector3.at(position.getBlockX(), getMinimumPoint().getBlockY(), position.getBlockZ()));
     }
 
     /**
@@ -678,14 +728,23 @@ public abstract class ProtectedRegion implements ChangeTracked, Comparable<Prote
         if (isTransient()) {
             return false;
         }
-        return dirty || owners.isDirty() || members.isDirty();
+
+        synchronized (this.ownersLock) {
+            synchronized (this.membersLock) {
+                synchronized (this.dirtyLock) {
+                    return dirty || owners.isDirty() || members.isDirty();
+                }
+            }
+        }
     }
 
     @Override
     public void setDirty(boolean dirty) {
-        this.dirty = dirty;
-        owners.setDirty(dirty);
-        members.setDirty(dirty);
+        synchronized (this.dirtyLock) {
+            this.dirty = dirty;
+        }
+        getOwners().setDirty(dirty);
+        getMembers().setDirty(dirty);
     }
 
     @Override
