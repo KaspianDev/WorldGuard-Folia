@@ -48,6 +48,7 @@ import com.sk89q.worldguard.config.WorldConfiguration;
 import com.sk89q.worldguard.protection.flags.Flags;
 import io.github.projectunified.minelib.scheduler.location.LocationScheduler;
 import io.papermc.lib.PaperLib;
+import io.papermc.paper.event.entity.EntityPushedByEntityAttackEvent;
 import io.papermc.paper.event.player.PlayerOpenSignEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
@@ -127,6 +128,7 @@ import org.bukkit.event.entity.EntityTameEvent;
 import org.bukkit.event.entity.EntityUnleashEvent;
 import org.bukkit.event.entity.ExpBottleEvent;
 import org.bukkit.event.entity.LingeringPotionSplashEvent;
+import org.bukkit.event.entity.PlayerLeashEntityEvent;
 import org.bukkit.event.entity.PotionSplashEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
@@ -942,9 +944,16 @@ public class EventAbstractionListener extends AbstractListener {
     }
 
     @EventHandler(ignoreCancelled = true)
+    public void onEntityLeash(PlayerLeashEntityEvent event) {
+        UseEntityEvent useEntityEvent = new UseEntityEvent(event, create(event.getPlayer()), event.getEntity());
+        useEntityEvent.getRelevantFlags().add(Flags.RIDE);
+        useEntityEvent.getRelevantFlags().add(Flags.INTERACT);
+        Events.fireToCancel(event, useEntityEvent);
+    }
+
+    @EventHandler(ignoreCancelled = true)
     public void onEntityUnleash(EntityUnleashEvent event) {
-        if (event instanceof PlayerUnleashEntityEvent) {
-            PlayerUnleashEntityEvent playerEvent = (PlayerUnleashEntityEvent) event;
+        if (event instanceof PlayerUnleashEntityEvent playerEvent) {
             Events.fireToCancel(playerEvent, new UseEntityEvent(playerEvent, create(playerEvent.getPlayer()), event.getEntity()));
         }
     }
@@ -1032,7 +1041,9 @@ public class EventAbstractionListener extends AbstractListener {
                 handleInventoryHolderUse(event, cause, sourceHolder);
             }
 
-            handleInventoryHolderUse(event, cause, targetHolder);
+            if (causeHolder != null && !causeHolder.equals(targetHolder)) {
+                handleInventoryHolderUse(event, cause, targetHolder);
+            }
 
             if (event.isCancelled() && causeHolder instanceof Hopper && wcfg.breakDeniedHoppers) {
                 Hopper hopper = (Hopper) causeHolder;
@@ -1324,8 +1335,8 @@ public class EventAbstractionListener extends AbstractListener {
         }
 
         @EventHandler(ignoreCancelled = true)
-        public void onEntityKnockbackByEntity(com.destroystokyo.paper.event.entity.EntityKnockbackByEntityEvent event) {
-            handleKnockback(event, event.getHitBy());
+        public void onEntityKnockbackByEntity(EntityPushedByEntityAttackEvent event) {
+            handleKnockback(event, event.getPushedBy());
         }
     }
 
